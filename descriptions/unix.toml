@@ -4,3 +4,15 @@ tags = [
   "see files",
   "show directory"
 ]
+
+[man]
+tags = [
+  "show help about a program",
+  "manual pages"
+]
+
+[touch]
+tags = [
+  "create files",
+  "update file acces"
+]
