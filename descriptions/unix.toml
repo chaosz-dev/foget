@@ -3,7 +3,7 @@ tags = [
   "list files in directory",
   "see files",
   "show directory"
-]
+, "directory contents"]
 
 [man]
 tags = [
