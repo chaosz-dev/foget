@@ -18,7 +18,7 @@ tags = [
 ]
 
 [cd]
-tags = ["change current directory"]
+tags = ["change current directory", "[cd] to change directory to user's homehome"]
 
 [mkdir]
 tags = ["create new directory"]

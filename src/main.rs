@@ -6,7 +6,10 @@ use std::{
     process::{self, ExitCode},
 };
 
-use colored::Colorize;
+use colored::{
+    control::{set_override, ShouldColorize},
+    *,
+};
 use toml_edit::*;
 
 enum Action {
@@ -95,6 +98,20 @@ fn print_help() {
     process::exit(0);
 }
 
+fn search_for_options(args: &Vec<String>) {
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--no-color" => {
+                set_override(false);
+            }
+            _ => {}
+        }
+
+        i += 1;
+    }
+}
+
 fn parse_arguments() -> Result<CommandDetails, ()> {
     let args: Vec<String> = env::args().collect();
 
@@ -108,6 +125,8 @@ fn parse_arguments() -> Result<CommandDetails, ()> {
                 print_error_and_exit(Error::NotEnoughArguments);
             }
 
+            search_for_options(&args);
+
             return Result::Ok(CommandDetails {
                 action: Action::Add,
                 args: vec![args[2].clone(), args[3].clone()],
@@ -118,6 +137,8 @@ fn parse_arguments() -> Result<CommandDetails, ()> {
                 print_error_and_exit(Error::NotEnoughArguments);
             }
 
+            search_for_options(&args);
+
             return Result::Ok(CommandDetails {
                 action: Action::Modify,
                 args: vec![args[2].clone(), args[3].clone()],
@@ -127,6 +148,8 @@ fn parse_arguments() -> Result<CommandDetails, ()> {
             if args.len() < 3 {
                 print_error_and_exit(Error::NotEnoughArguments);
             }
+
+            search_for_options(&args);
 
             if args.len() < 4 {
                 return Result::Ok(CommandDetails {
@@ -145,6 +168,8 @@ fn parse_arguments() -> Result<CommandDetails, ()> {
                 print_error_and_exit(Error::NotEnoughArguments);
             }
 
+            search_for_options(&args);
+
             return Result::Ok({
                 CommandDetails {
                     action: Action::Show,
@@ -157,6 +182,8 @@ fn parse_arguments() -> Result<CommandDetails, ()> {
                 print_error_and_exit(Error::NotEnoughArguments);
             }
 
+            search_for_options(&args);
+
             return Result::Ok({
                 CommandDetails {
                     action: Action::Search,
@@ -165,6 +192,7 @@ fn parse_arguments() -> Result<CommandDetails, ()> {
             });
         }
         "help" | "h" | _ => {
+            search_for_options(&args);
             print_help();
         }
     }
