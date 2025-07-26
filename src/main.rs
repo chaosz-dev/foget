@@ -1,24 +1,19 @@
 use std::{
-    any::Any,
     env,
-    fmt::Display,
     fs::File,
     io::prelude::*,
-    path::Path,
+    path::{Path, PathBuf},
     process::{self, ExitCode},
-    str::FromStr,
 };
 
-use serde::Serialize;
-use toml::*;
 use toml_edit::*;
 
 enum Action {
+    Search,
+    Show,
     Add,
     Modify,
     Delete,
-    Show,
-    Search,
 }
 
 enum Error {
@@ -26,6 +21,7 @@ enum Error {
     UnspecifiedCommand,
     CouldNotOpenFile,
     Internal,
+    CommandNotFound,
     UnknownReason,
 }
 
@@ -50,7 +46,10 @@ fn print_error_and_exit(err: Error) {
         Error::Internal => {
             eprintln!("Unexpected internal error.");
         }
-        Error::UnknownReason => {
+        Error::CommandNotFound => {
+            eprintln!("Command not found in database.")
+        }
+        Error::UnknownReason | _ => {
             eprintln!("Unknown error. Exiting.");
         }
     }
@@ -59,22 +58,33 @@ fn print_error_and_exit(err: Error) {
 }
 
 fn print_help() {
-    println!("Usage: $[foget] [action] [action parameters]");
-    println!("\tActions:");
+    println!("Usage:\n  foget [action] [action parameters]\n");
+    println!("Actions:");
 
-    println!("\t[add or a] [name of the command] [tags]");
-    println!("\t\tadd a new command and tags to the datatabase");
+    println!("[search or se] [string to search]");
+    println!("   show commands which description cointain the entered string");
 
-    println!("\t[modify or mod or m] [name of the command] [new tags]");
-    println!("\t\tmodify a command by adding new tags to the datatabase");
+    println!("[show or sho or s] [name of the command]");
+    println!("   show command and associated tags");
 
-    // TODO: Other help messages
+    println!("[add or a] [name of the command] [tag to be added]");
+    println!("   add a new command and tags to the datatabase");
+
+    println!("[modify or mod or m] [name of the command] [new tags]");
+    println!("   modify a command by adding new tags to the datatabase");
+
+    println!("[del] [name of the command]");
+    println!("   delete the command and it's associated tags");
 
     process::exit(0);
 }
 
 fn parse_arguments() -> Result<CommandDetails, ()> {
     let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        print_help();
+    }
 
     match args[1].as_str() {
         "add" | "a" => {
@@ -91,11 +101,28 @@ fn parse_arguments() -> Result<CommandDetails, ()> {
             if args.len() < 4 {
                 print_error_and_exit(Error::NotEnoughArguments);
             }
+
+            return Result::Ok(CommandDetails {
+                action: Action::Modify,
+                args: vec![args[2].clone(), args[3].clone()],
+            });
         }
         "delete" | "del" | "d" => {
             if args.len() < 3 {
                 print_error_and_exit(Error::NotEnoughArguments);
             }
+
+            if args.len() < 4 {
+                return Result::Ok(CommandDetails {
+                    action: Action::Delete,
+                    args: vec![args[2].clone()],
+                });
+            }
+
+            return Result::Ok(CommandDetails {
+                action: Action::Delete,
+                args: vec![args[2].clone(), args[3].clone()],
+            });
         }
         "show" | "sho" | "sh" => {
             if args.len() < 3 {
@@ -121,15 +148,12 @@ fn parse_arguments() -> Result<CommandDetails, ()> {
                 }
             });
         }
-        "help" | "h" => {
+        "help" | "h" | _ => {
             print_help();
-        }
-        _ => {
-            print_error_and_exit(Error::UnspecifiedCommand);
         }
     }
 
-    print_error_and_exit(Error::UnspecifiedCommand);
+    print_error_and_exit(Error::UnknownReason);
     Err(())
 }
 
@@ -166,9 +190,25 @@ fn show_command_tags(details: CommandDetails, toml: toml_edit::DocumentMut) {
     if toml.contains_key(&details.args[0]) {
         println!("Found descriptions for command `{}`:", details.args[0]);
 
+        let arr = match toml[&details.args[0]]["tags"].as_array() {
+            Some(arr) => arr,
+            _ => {
+                print_error_and_exit(Error::Internal);
+                panic!();
+            }
+        };
+
         let mut i = 0;
-        while i < toml[&details.args[0]]["tags"].as_array().unwrap().len() {
-            println!("\t{}", toml[&details.args[0]]["tags"][i].as_str().unwrap());
+        while i < arr.len() {
+            println!(
+                "\t{}",
+                toml[&details.args[0]]["tags"][i]
+                    .as_str()
+                    .unwrap_or_else(|| {
+                        print_error_and_exit(Error::Internal);
+                        ""
+                    })
+            );
             i += 1;
         }
     }
@@ -187,7 +227,15 @@ fn search_descriptions(details: CommandDetails, toml: toml_edit::DocumentMut) {
                     .as_array()
                     .unwrap_or(&toml_edit::Array::new())
                 {
-                    if desc.is_str() && desc.as_str().unwrap().contains(&details.args[0]) {
+                    if desc.is_str()
+                        && desc
+                            .as_str()
+                            .unwrap_or_else(|| {
+                                print_error_and_exit(Error::Internal);
+                                ""
+                            })
+                            .contains(&details.args[0])
+                    {
                         commands.push(String::from(key));
                         break;
                     }
@@ -208,13 +256,96 @@ fn search_descriptions(details: CommandDetails, toml: toml_edit::DocumentMut) {
     }
 }
 
+// TODO: filter duplicates
 fn add_description(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
-    let path = Path::new("./descriptions/unix.toml");
+    if toml.contains_key(&details.args[0]) {
+        let arr: &mut Array = match toml[&details.args[0]]["tags"].as_array_mut() {
+            None => {
+                print_error_and_exit(Error::Internal);
+                &mut toml_edit::Array::new()
+            }
+            Some(arr) => arr,
+        };
+
+        arr.push(details.args[1].clone());
+    } else {
+        toml[&details.args[0]] = Item::Table(toml_edit::Table::new());
+        toml[&details.args[0]]["tags"] =
+            Item::Value(toml_edit::Value::Array(toml_edit::Array::new()));
+        match toml[&details.args[0]]["tags"].as_array_mut() {
+            Some(arr) => arr.push(details.args[1].clone()),
+            _ => {}
+        }
+    }
+
+    write_doc_to_file(toml);
+
+    if details.args.len() < 2 {
+        println!("Successfully added {} to database", details.args[0]);
+    } else {
+        println!(
+            "Successfully added tag: '{}' to '{}' to command database",
+            details.args[0], details.args[1]
+        );
+    }
+}
+
+fn delete(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
+    if details.args.len() < 2 {
+        toml.remove_entry(&details.args[0]);
+    } else {
+        match toml[&details.args[0]]["tags"].as_array_mut() {
+            None => {
+                print_error_and_exit(Error::Internal);
+            }
+            Some(arr) => {
+                arr.retain(|x| x.as_str().unwrap_or("") != details.args[1]);
+            }
+        };
+    }
+
+    write_doc_to_file(toml);
+    println!("Successfully deleted command {}", details.args[0]);
+}
+
+fn modify(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
+    if !toml.contains_key(details.args[0].as_str()) {
+        print_error_and_exit(Error::CommandNotFound);
+    }
+
+    match toml[&details.args[0]]["tags"].as_array_mut() {
+        None => {
+            print_error_and_exit(Error::Internal);
+        }
+        Some(arr) => {
+            arr.push(details.args[1].clone());
+        }
+    };
+
+    write_doc_to_file(toml);
+
+    println!(
+        "Successfully added {} to {}",
+        details.args[1], details.args[0]
+    );
+}
+
+fn write_doc_to_file(toml: &toml_edit::DocumentMut) {
+    let datab = if cfg!(unix) {
+        std::env::home_dir()
+            .unwrap_or(PathBuf::new())
+            .into_os_string()
+            .into_string()
+            .unwrap_or(String::new())
+            + "/foget/descriptions/unix.toml"
+    } else {
+        todo!();
+    };
 
     let mut file: File = match std::fs::OpenOptions::new()
         .write(true)
         .truncate(true)
-        .open(path)
+        .open(datab)
     {
         Err(why) => {
             print_error_and_exit(Error::CouldNotOpenFile);
@@ -222,21 +353,6 @@ fn add_description(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
         }
         Ok(file) => file,
     };
-
-    let arr: &mut Array = match toml[&details.args[0]]["tags"].as_array_mut() {
-        None => {
-            print_error_and_exit(Error::Internal);
-            &mut toml_edit::Array::new()
-        }
-        Some(arr) => arr,
-    };
-
-    if !arr.is_empty() {
-        arr.push(details.args[1].clone());
-    } else {
-    }
-
-    println!("{}", toml.to_string());
 
     match file.write_all(toml.to_string().as_bytes()) {
         Err(why) => {
@@ -272,7 +388,15 @@ fn main() -> ExitCode {
         Action::Add => {
             add_description(details, &mut parse_toml());
         }
-        _ => {}
+        Action::Delete => {
+            delete(details, &mut parse_toml());
+        }
+        Action::Modify => {
+            modify(details, &mut parse_toml());
+        }
+        _ => {
+            print_error_and_exit(Error::UnknownReason);
+        }
     }
 
     ExitCode::SUCCESS
