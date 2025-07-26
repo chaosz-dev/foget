@@ -6,6 +6,7 @@ use std::{
     process::{self, ExitCode},
 };
 
+use colored::Colorize;
 use toml_edit::*;
 
 enum Action {
@@ -18,11 +19,12 @@ enum Action {
 
 enum Error {
     NotEnoughArguments,
-    UnspecifiedCommand,
     CouldNotOpenFile,
     Internal,
     CommandNotFound,
     UnknownReason,
+    TagNotFound,
+    AlreadyInDatabase,
 }
 
 struct CommandDetails {
@@ -31,17 +33,13 @@ struct CommandDetails {
 }
 
 fn print_error_and_exit(err: Error) {
+    eprint!("{}", String::from("Error: ").red());
     match err {
         Error::NotEnoughArguments => {
-            eprintln!(
-                "Incorrect amount of arguments! You should use [foget] [action] [action parameters]\n"
-            );
-        }
-        Error::UnspecifiedCommand => {
-            eprintln!("Could not understand action. Please specify one from the list [ show, add, modify, delete ].\n");
+            eprintln!("Incorrect amount of arguments! You should use [foget] [action] [action parameters]");
         }
         Error::CouldNotOpenFile => {
-            eprintln!("Could not open database file located in \"~/foget/descriptions/unix.toml\". Exiting now.")
+            eprintln!("Could not open database file located in \"~/foget/descriptions/unix.toml\".")
         }
         Error::Internal => {
             eprintln!("Unexpected internal error.");
@@ -49,8 +47,14 @@ fn print_error_and_exit(err: Error) {
         Error::CommandNotFound => {
             eprintln!("Command not found in database.")
         }
-        Error::UnknownReason | _ => {
-            eprintln!("Unknown error. Exiting.");
+        Error::UnknownReason => {
+            eprintln!("Unknown error.");
+        }
+        Error::TagNotFound => {
+            eprintln!("Tag not found in database.");
+        }
+        Error::AlreadyInDatabase => {
+            eprintln!("Tag already in database.")
         }
     }
 
@@ -58,22 +62,34 @@ fn print_error_and_exit(err: Error) {
 }
 
 fn print_help() {
-    println!("Usage:\n  foget [action] [action parameters]\n");
-    println!("Actions:");
+    println!(
+        "{}",
+        "Usage:\n  foget [action] [action parameters]\n".bold()
+    );
+    println!("{}", "Actions:".red());
 
-    println!("[search or se] [string to search]");
+    println!("{}", "[search or se] [string to search]".bright_cyan());
     println!("   show commands which description cointain the entered string");
 
-    println!("[show or sho or s] [name of the command]");
+    println!(
+        "{}",
+        "[show or sho or s] [name of the command]".bright_cyan()
+    );
     println!("   show command and associated tags");
 
-    println!("[add or a] [name of the command] [tag to be added]");
+    println!(
+        "{}",
+        "[add or a] [name of the command] [tag to be added]".bright_cyan()
+    );
     println!("   add a new command and tags to the datatabase");
 
-    println!("[modify or mod or m] [name of the command] [new tags]");
+    println!(
+        "{}",
+        "[modify or mod or m] [name of the command] [new tags]".bright_cyan()
+    );
     println!("   modify a command by adding new tags to the datatabase");
 
-    println!("[del] [name of the command]");
+    println!("{}", "[del] [name of the command]".bright_cyan());
     println!("   delete the command and it's associated tags");
 
     process::exit(0);
@@ -188,7 +204,10 @@ fn parse_toml() -> DocumentMut {
 
 fn show_command_tags(details: CommandDetails, toml: toml_edit::DocumentMut) {
     if toml.contains_key(&details.args[0]) {
-        println!("Found descriptions for command `{}`:", details.args[0]);
+        println!(
+            "Found descriptions for command `{}`:",
+            details.args[0].blue().bold()
+        );
 
         let arr = match toml[&details.args[0]]["tags"].as_array() {
             Some(arr) => arr,
@@ -245,18 +264,37 @@ fn search_descriptions(details: CommandDetails, toml: toml_edit::DocumentMut) {
     }
 
     if commands.len() > 0 {
-        println!("Commands with matching functionality:");
+        println!("{}", "Commands with matching functionality:".bold());
+
         let mut i = 0;
         while i < commands.len() {
-            println!("{} -- {}", commands[i], toml[&commands[i]]["tags"]);
+            println!("{}", commands[i].blue().bold(),);
+            let mut j = 0;
+            while j < toml[&commands[i]]["tags"]
+                .as_array()
+                .unwrap_or(&toml_edit::Array::new())
+                .len()
+            {
+                println!(
+                    "  {}. {}",
+                    (j + 1).to_string().red(),
+                    toml[&commands[i]]["tags"][j]
+                        .as_str()
+                        .unwrap_or_else(|| {
+                            print_error_and_exit(Error::Internal);
+                            ""
+                        })
+                        .trim()
+                );
+                j += 1;
+            }
             i += 1;
         }
     } else {
-        println!("No commands match the searched functionality.");
+        print_error_and_exit(Error::TagNotFound);
     }
 }
 
-// TODO: filter duplicates
 fn add_description(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
     if toml.contains_key(&details.args[0]) {
         let arr: &mut Array = match toml[&details.args[0]]["tags"].as_array_mut() {
@@ -266,6 +304,14 @@ fn add_description(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
             }
             Some(arr) => arr,
         };
+
+        if arr
+            .iter()
+            .find(|&x| x.as_str().unwrap_or("") == details.args[1])
+            .is_some()
+        {
+            print_error_and_exit(Error::AlreadyInDatabase);
+        }
 
         arr.push(details.args[1].clone());
     } else {
@@ -281,11 +327,12 @@ fn add_description(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
     write_doc_to_file(toml);
 
     if details.args.len() < 2 {
-        println!("Successfully added {} to database", details.args[0]);
+        println!("Successfully added {} to database", details.args[0].red());
     } else {
         println!(
             "Successfully added tag: '{}' to '{}' to command database",
-            details.args[0], details.args[1]
+            details.args[0].blue(),
+            details.args[1].red()
         );
     }
 }
@@ -293,6 +340,7 @@ fn add_description(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
 fn delete(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
     if details.args.len() < 2 {
         toml.remove_entry(&details.args[0]);
+        println!("Successfully deleted command {}", details.args[0].red());
     } else {
         match toml[&details.args[0]]["tags"].as_array_mut() {
             None => {
@@ -302,10 +350,14 @@ fn delete(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
                 arr.retain(|x| x.as_str().unwrap_or("") != details.args[1]);
             }
         };
+        println!(
+            "Successfully deleted command {}'s entry: {}",
+            details.args[0].red(),
+            details.args[1].blue()
+        );
     }
 
     write_doc_to_file(toml);
-    println!("Successfully deleted command {}", details.args[0]);
 }
 
 fn modify(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
@@ -326,7 +378,8 @@ fn modify(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
 
     println!(
         "Successfully added {} to {}",
-        details.args[1], details.args[0]
+        details.args[1].blue(),
+        details.args[0].red()
     );
 }
 
@@ -393,9 +446,6 @@ fn main() -> ExitCode {
         }
         Action::Modify => {
             modify(details, &mut parse_toml());
-        }
-        _ => {
-            print_error_and_exit(Error::UnknownReason);
         }
     }
 
