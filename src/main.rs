@@ -1,15 +1,12 @@
 use std::{
-    env,
+    env, fs,
     fs::File,
     io::prelude::*,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{self, ExitCode},
 };
 
-use colored::{
-    control::{set_override, ShouldColorize},
-    *,
-};
+use colored::{control::set_override, *};
 use toml_edit::*;
 
 enum Action {
@@ -18,6 +15,7 @@ enum Action {
     Add,
     Modify,
     Delete,
+    Default,
 }
 
 enum Error {
@@ -25,7 +23,6 @@ enum Error {
     CouldNotOpenFile,
     Internal,
     CommandNotFound,
-    UnknownReason,
     TagNotFound,
     AlreadyInDatabase,
 }
@@ -33,6 +30,71 @@ enum Error {
 struct CommandDetails {
     action: Action,
     args: Vec<String>,
+    descriptions: PathBuf,
+}
+
+fn search_for_toml() -> PathBuf {
+    let path: PathBuf = PathBuf::new();
+
+    match env::var("HOME") {
+        Ok(res) => {
+            let descriptions: PathBuf = [res, "unix.toml".to_string()].into_iter().collect();
+            match fs::exists(&descriptions) {
+                Ok(res) => {
+                    if res {
+                        return descriptions;
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+        Err(_) => {}
+    }
+
+    match env::var("HOME") {
+        Ok(res) => {
+            let descriptions: PathBuf = [res.as_str(), ".config", "foget", "unix.toml"]
+                .into_iter()
+                .collect();
+            match fs::exists(&descriptions) {
+                Ok(res) => {
+                    if res {
+                        return descriptions;
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+        Err(_) => {}
+    }
+
+    match env::var("FOGET_DESCRIPTIONS") {
+        Ok(res) => {
+            let descriptions: PathBuf = PathBuf::from(res);
+            match fs::exists(&descriptions) {
+                Ok(res) => {
+                    if res {
+                        return descriptions;
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+        Err(_) => {}
+    }
+
+    print_error_and_exit(Error::CouldNotOpenFile);
+    path
+}
+
+impl Default for CommandDetails {
+    fn default() -> CommandDetails {
+        CommandDetails {
+            action: Action::Default,
+            args: Vec::new(),
+            descriptions: search_for_toml(),
+        }
+    }
 }
 
 fn print_error_and_exit(err: Error) {
@@ -42,16 +104,13 @@ fn print_error_and_exit(err: Error) {
             eprintln!("Incorrect amount of arguments! You should use [foget] [action] [action parameters]");
         }
         Error::CouldNotOpenFile => {
-            eprintln!("Could not open database file located in \"~/foget/descriptions/unix.toml\".")
+            eprintln!("Could not open database file.");
         }
         Error::Internal => {
             eprintln!("Unexpected internal error.");
         }
         Error::CommandNotFound => {
             eprintln!("Command not found in database.")
-        }
-        Error::UnknownReason => {
-            eprintln!("Unknown error.");
         }
         Error::TagNotFound => {
             eprintln!("Tag not found in database.");
@@ -98,12 +157,20 @@ fn print_help() {
     process::exit(0);
 }
 
-fn search_for_options(args: &Vec<String>) {
+fn search_for_options(details: &mut CommandDetails, args: &Vec<String>) {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--no-color" => {
                 set_override(false);
+            }
+            "--descriptions" => {
+                if args.len() < i + 1 {
+                    print_error_and_exit(Error::NotEnoughArguments);
+                }
+
+                details.descriptions = PathBuf::from(args[i + 1].clone());
+                i += 1;
             }
             _ => {}
         }
@@ -112,8 +179,11 @@ fn search_for_options(args: &Vec<String>) {
     }
 }
 
-fn parse_arguments() -> Result<CommandDetails, ()> {
+fn parse_arguments() -> CommandDetails {
     let args: Vec<String> = env::args().collect();
+    let mut details: CommandDetails = CommandDetails {
+        ..Default::default()
+    };
 
     if args.len() < 2 {
         print_help();
@@ -125,86 +195,67 @@ fn parse_arguments() -> Result<CommandDetails, ()> {
                 print_error_and_exit(Error::NotEnoughArguments);
             }
 
-            search_for_options(&args);
+            search_for_options(&mut details, &args);
 
-            return Result::Ok(CommandDetails {
-                action: Action::Add,
-                args: vec![args[2].clone(), args[3].clone()],
-            });
+            details.action = Action::Add;
+            details.args = vec![args[2].clone(), args[3].clone()];
         }
         "modify" | "m" | "mod" => {
             if args.len() < 4 {
                 print_error_and_exit(Error::NotEnoughArguments);
             }
 
-            search_for_options(&args);
+            search_for_options(&mut details, &args);
 
-            return Result::Ok(CommandDetails {
-                action: Action::Modify,
-                args: vec![args[2].clone(), args[3].clone()],
-            });
+            details.action = Action::Modify;
+            details.args = vec![args[2].clone(), args[3].clone()];
         }
         "delete" | "del" | "d" => {
             if args.len() < 3 {
                 print_error_and_exit(Error::NotEnoughArguments);
             }
 
-            search_for_options(&args);
+            search_for_options(&mut details, &args);
+
+            details.action = Action::Delete;
 
             if args.len() < 4 {
-                return Result::Ok(CommandDetails {
-                    action: Action::Delete,
-                    args: vec![args[2].clone()],
-                });
+                details.args = vec![args[2].clone()];
+            } else {
+                details.args = vec![args[2].clone(), args[3].clone()];
             }
-
-            return Result::Ok(CommandDetails {
-                action: Action::Delete,
-                args: vec![args[2].clone(), args[3].clone()],
-            });
         }
         "show" | "sho" | "sh" => {
             if args.len() < 3 {
                 print_error_and_exit(Error::NotEnoughArguments);
             }
 
-            search_for_options(&args);
+            search_for_options(&mut details, &args);
 
-            return Result::Ok({
-                CommandDetails {
-                    action: Action::Show,
-                    args: vec![args[2].clone()],
-                }
-            });
+            details.action = Action::Show;
+            details.args = vec![args[2].clone()];
         }
         "search" | "se" => {
             if args.len() < 3 {
                 print_error_and_exit(Error::NotEnoughArguments);
             }
 
-            search_for_options(&args);
+            search_for_options(&mut details, &args);
 
-            return Result::Ok({
-                CommandDetails {
-                    action: Action::Search,
-                    args: vec![args[2].clone()],
-                }
-            });
+            details.action = Action::Search;
+            details.args = vec![args[2].clone()];
         }
         "help" | "h" | _ => {
-            search_for_options(&args);
+            search_for_options(&mut details, &args);
             print_help();
         }
     }
 
-    print_error_and_exit(Error::UnknownReason);
-    Err(())
+    details
 }
 
-fn parse_toml() -> DocumentMut {
-    let path = Path::new("./descriptions/unix.toml");
-
-    let mut file: File = match File::open(path) {
+fn parse_toml(location: &PathBuf) -> DocumentMut {
+    let mut file: File = match File::open(location) {
         Err(why) => {
             print_error_and_exit(Error::CouldNotOpenFile);
             panic!("{:?}", why);
@@ -233,7 +284,8 @@ fn parse_toml() -> DocumentMut {
 fn show_command_tags(details: CommandDetails, toml: toml_edit::DocumentMut) {
     if toml.contains_key(&details.args[0]) {
         println!(
-            "Found descriptions for command `{}`:",
+            "{} :`{}`",
+            "Found descriptions for command".bold(),
             details.args[0].blue().bold()
         );
 
@@ -248,7 +300,8 @@ fn show_command_tags(details: CommandDetails, toml: toml_edit::DocumentMut) {
         let mut i = 0;
         while i < arr.len() {
             println!(
-                "\t{}",
+                " {}. {}",
+                (i + 1).to_string().red(),
                 toml[&details.args[0]]["tags"][i]
                     .as_str()
                     .unwrap_or_else(|| {
@@ -352,7 +405,7 @@ fn add_description(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
         }
     }
 
-    write_doc_to_file(toml);
+    write_doc_to_file(details.descriptions, toml);
 
     if details.args.len() < 2 {
         println!("Successfully added {} to database", details.args[0].red());
@@ -385,7 +438,7 @@ fn delete(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
         );
     }
 
-    write_doc_to_file(toml);
+    write_doc_to_file(details.descriptions, toml);
 }
 
 fn modify(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
@@ -402,7 +455,7 @@ fn modify(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
         }
     };
 
-    write_doc_to_file(toml);
+    write_doc_to_file(details.descriptions, toml);
 
     println!(
         "Successfully added {} to {}",
@@ -411,22 +464,11 @@ fn modify(details: CommandDetails, toml: &mut toml_edit::DocumentMut) {
     );
 }
 
-fn write_doc_to_file(toml: &toml_edit::DocumentMut) {
-    let datab = if cfg!(unix) {
-        std::env::home_dir()
-            .unwrap_or(PathBuf::new())
-            .into_os_string()
-            .into_string()
-            .unwrap_or(String::new())
-            + "/foget/descriptions/unix.toml"
-    } else {
-        todo!();
-    };
-
+fn write_doc_to_file(descriptions: PathBuf, toml: &toml_edit::DocumentMut) {
     let mut file: File = match std::fs::OpenOptions::new()
         .write(true)
         .truncate(true)
-        .open(datab)
+        .open(descriptions)
     {
         Err(why) => {
             print_error_and_exit(Error::CouldNotOpenFile);
@@ -451,29 +493,27 @@ fn write_doc_to_file(toml: &toml_edit::DocumentMut) {
 }
 
 fn main() -> ExitCode {
-    let details = match parse_arguments() {
-        Ok(details) => details,
-        Err(_) => {
-            print_error_and_exit(Error::NotEnoughArguments);
-            panic!();
-        }
-    };
+    let details = parse_arguments();
+    let mut toml = parse_toml(&details.descriptions);
 
     match details.action {
         Action::Show => {
-            show_command_tags(details, parse_toml());
+            show_command_tags(details, toml);
         }
         Action::Search => {
-            search_descriptions(details, parse_toml());
+            search_descriptions(details, toml);
         }
         Action::Add => {
-            add_description(details, &mut parse_toml());
+            add_description(details, &mut toml);
         }
         Action::Delete => {
-            delete(details, &mut parse_toml());
+            delete(details, &mut toml);
         }
         Action::Modify => {
-            modify(details, &mut parse_toml());
+            modify(details, &mut toml);
+        }
+        _ => {
+            print_error_and_exit(Error::Internal);
         }
     }
 
