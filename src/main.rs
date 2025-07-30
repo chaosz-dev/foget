@@ -38,7 +38,8 @@ fn search_for_toml() -> PathBuf {
 
     match env::var("HOME") {
         Ok(res) => {
-            let descriptions: PathBuf = [res, "unix.toml".to_string()].into_iter().collect();
+            let descriptions: PathBuf =
+                [res, "descriptions.toml".to_string()].into_iter().collect();
             match fs::exists(&descriptions) {
                 Ok(res) => {
                     if res {
@@ -53,7 +54,7 @@ fn search_for_toml() -> PathBuf {
 
     match env::var("HOME") {
         Ok(res) => {
-            let descriptions: PathBuf = [res.as_str(), ".config", "foget", "unix.toml"]
+            let descriptions: PathBuf = [res.as_str(), ".config", "foget", "descriptions.toml"]
                 .into_iter()
                 .collect();
             match fs::exists(&descriptions) {
@@ -126,33 +127,41 @@ fn print_error_and_exit(err: Error) {
 fn print_help() {
     println!(
         "{}",
-        "Usage:\n  foget [action] [action parameters]\n".bold()
+        "Usage:\n  foget [action] [action parameters] [options]\n".bold()
     );
     println!("{}", "Actions:".red());
 
-    println!("{}", "[search or se] [string to search]".bright_cyan());
+    println!("{}", " [search or se] [string to search]".bright_cyan());
     println!("   show commands which description cointain the entered string");
 
     println!(
         "{}",
-        "[show or sho or s] [name of the command]".bright_cyan()
+        " [show or sho or sh] [name of the command]".bright_cyan()
     );
     println!("   show command and associated tags");
 
     println!(
         "{}",
-        "[add or a] [name of the command] [tag to be added]".bright_cyan()
+        " [add or a] [name of the command] [tag to be added]".bright_cyan()
     );
     println!("   add a new command and tags to the datatabase");
 
     println!(
         "{}",
-        "[modify or mod or m] [name of the command] [new tags]".bright_cyan()
+        " [modify or mod or m] [name of the command] [new tags]".bright_cyan()
     );
     println!("   modify a command by adding new tags to the datatabase");
 
-    println!("{}", "[del] [name of the command]".bright_cyan());
+    println!("{}", " [del] [name of the command]".bright_cyan());
     println!("   delete the command and it's associated tags");
+
+    println!("{}", "\nOptions:".red());
+
+    println!(
+        "{}",
+        " --descriptions [path]\tmanually add descriptions file to use"
+    );
+    println!("{}", " --no-color\tdo not use colors");
 
     process::exit(0);
 }
